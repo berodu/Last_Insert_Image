@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 작업 파일들
+captured_images/
+*_processed.xlsx
+*.tmp
+
+# 샘플 데이터 (실제 프로젝트 데이터는 제외)
+수원아이파크시티-sample*.xlsx
+입상관/*.mp4
+입상관/*.jpg
+입상관/*.jpeg
+입상관/*.png
+횡주관/*.mp4
+횡주관/*.jpg
+횡주관/*.jpeg
+횡주관/*.png
+
+# 로그 파일
+*.log
+
+# 데이터 파일들
+작업폴더.zip
+작업폴더/
+입상관/
+횡주관/
+*.xlsx
+*.mp4
+*.jpg
+*.jpeg
+*.png 
