@@ -72,10 +72,13 @@ class VideoExcelProcessor:
     
     def extract_video_info(self, filename, pipe_type):
         """동영상 파일명에서 정보 추출"""
+        # (이상배관) 부분 제거
+        clean_filename = re.sub(r'\(이상배관\)', '', filename)
+        
         if pipe_type == '입상':
             # 예: "1102동 4호 입상관 세탁.mp4"
             pattern = r'(\d+동)\s+(\d+호)\s+입상관\s+(.+)\.mp4'
-            match = re.match(pattern, filename)
+            match = re.match(pattern, clean_filename)
             
             if match:
                 dong = match.group(1)  # "1102동"
@@ -96,7 +99,7 @@ class VideoExcelProcessor:
         elif pipe_type == '횡주':
             # 예: "1101동 1-1호 횡주관 배수.mp4"
             pattern = r'(\d+동)\s+(\d+-\d+호)\s+횡주관\s+(.+)\.mp4'
-            match = re.match(pattern, filename)
+            match = re.match(pattern, clean_filename)
             
             if match:
                 dong = match.group(1)      # "1101동"
@@ -355,8 +358,26 @@ class VideoExcelProcessor:
         capture_dir = os.path.join(os.getcwd(), 'captured_images')
         os.makedirs(capture_dir, exist_ok=True)
         
+        # 이미지 파일 그룹핑 (동, 호, 용도별로)
+        image_groups = {}
+        all_files = os.listdir(folder_path)
+        
+        # 이미지 파일들을 먼저 그룹핑
+        for filename in all_files:
+            if filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                image_info = self.extract_image_info(filename, pipe_type)
+                if image_info:
+                    if pipe_type == '횡주':
+                        key = (image_info['dong'], image_info['ho'], image_info['usage'], image_info['line_detail'])
+                    else:
+                        key = (image_info['dong'], image_info['ho'], image_info['usage'])
+                    
+                    if key not in image_groups:
+                        image_groups[key] = []
+                    image_groups[key].append((filename, image_info))
+        
         # 동영상 파일 처리
-        for filename in os.listdir(folder_path):
+        for filename in all_files:
             if filename.endswith('.mp4'):
                 video_info = self.extract_video_info(filename, pipe_type)
                 if not video_info:
@@ -408,44 +429,52 @@ class VideoExcelProcessor:
                             self.insert_image_to_cell(worksheet, captured_files[0], row, position_col)
                         self.insert_image_to_cell(worksheet, captured_files[1], row, check1_col)
                         self.insert_image_to_cell(worksheet, captured_files[2], row, check2_col)
+        
+        # 이미지 파일 처리 (그룹별로 첫 번째만)
+        processed_groups = set()
+        for key, files_info in image_groups.items():
+            if key in processed_groups:
+                continue
             
-            # 이미지 파일 처리
-            elif filename.lower().endswith(('.jpg', '.jpeg', '.png')):
-                image_info = self.extract_image_info(filename, pipe_type)
-                if not image_info:
-                    continue
-                
-                print(f"이미지 처리 중: {filename}")
-                
-                # 해당 단지, 유형 워크시트 선택
-                worksheet = self.get_or_create_worksheet(image_info['complex'], pipe_type)
-                
-                # 해당하는 행 찾거나 생성
-                if pipe_type == '횡주':
-                    row = self.find_or_create_row(worksheet, pipe_type, image_info['dong'], 
-                                                image_info['ho'], image_info['usage'], 
-                                                image_info['line_detail'])
-                else:
-                    row = self.find_or_create_row(worksheet, pipe_type, image_info['dong'], 
-                                                image_info['ho'], image_info['usage'])
-                if not row:
-                    continue
-                
-                # 컬럼 번호 찾기
-                issue_image_col = self.find_column_by_name(worksheet, '이상배관사진')
-                issue_col = self.find_column_by_name(worksheet, '이상유무')
-                location_col = self.find_column_by_name(worksheet, '위치')
-                
-                # 이미지 삽입
-                if issue_image_col:
-                    image_path = os.path.join(folder_path, filename)
-                    self.insert_image_to_cell(worksheet, image_path, row, issue_image_col)
-                
-                # 텍스트 정보 입력
-                if issue_col:
-                    worksheet.cell(row, issue_col).value = image_info['issue']
-                if location_col:
-                    worksheet.cell(row, location_col).value = image_info['location']
+            # 첫 번째 파일만 처리
+            filename, image_info = files_info[0]
+            total_count = len(files_info)
+            
+            print(f"이미지 처리 중: {filename} (총 {total_count}개 중 첫 번째)")
+            
+            # 해당 단지, 유형 워크시트 선택
+            worksheet = self.get_or_create_worksheet(image_info['complex'], pipe_type)
+            
+            # 해당하는 행 찾거나 생성
+            if pipe_type == '횡주':
+                row = self.find_or_create_row(worksheet, pipe_type, image_info['dong'], 
+                                            image_info['ho'], image_info['usage'], 
+                                            image_info['line_detail'])
+            else:
+                row = self.find_or_create_row(worksheet, pipe_type, image_info['dong'], 
+                                            image_info['ho'], image_info['usage'])
+            if not row:
+                continue
+            
+            # 컬럼 번호 찾기
+            issue_image_col = self.find_column_by_name(worksheet, '이상배관사진')
+            issue_col = self.find_column_by_name(worksheet, '이상유무')
+            location_col = self.find_column_by_name(worksheet, '위치')
+            
+            # 이미지 삽입
+            if issue_image_col:
+                image_path = os.path.join(folder_path, filename)
+                self.insert_image_to_cell(worksheet, image_path, row, issue_image_col)
+            
+            # 텍스트 정보 입력
+            if issue_col:
+                worksheet.cell(row, issue_col).value = image_info['issue']
+            if location_col:
+                # 위치 정보에 총 개수 추가
+                location_text = f"{image_info['location']}({total_count})" if total_count > 1 else image_info['location']
+                worksheet.cell(row, location_col).value = location_text
+            
+            processed_groups.add(key)
 
     def save_excel(self, output_file=None):
         """엑셀 파일 저장"""

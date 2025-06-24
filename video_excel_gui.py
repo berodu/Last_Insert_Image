@@ -15,8 +15,8 @@ from video_excel_processor import VideoExcelProcessor
 class VideoExcelGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("동영상/이미지 → 엑셀 처리기")
-        self.root.geometry("800x600")
+        self.root.title("Final Report - Insert Images")
+        self.root.geometry("600x800")
         
         # 처리 상태
         self.is_processing = False
@@ -302,10 +302,29 @@ class CustomVideoExcelProcessor(VideoExcelProcessor):
         total = 0
         for folder_name in ["입상관", "횡주관"]:
             if os.path.exists(folder_name):
+                # 동영상 파일 수
+                video_count = 0
+                # 이미지 파일 그룹 수
+                image_groups = {}
+                
                 for filename in os.listdir(folder_name):
-                    if (filename.endswith('.mp4') or 
-                        filename.lower().endswith(('.jpg', '.jpeg', '.png'))):
-                        total += 1
+                    if filename.endswith('.mp4'):
+                        video_count += 1
+                    elif filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                        # 파일명에서 정보 추출하여 그룹핑
+                        pipe_type = '입상' if folder_name == '입상관' else '횡주'
+                        image_info = self.extract_image_info(filename, pipe_type)
+                        if image_info:
+                            if pipe_type == '횡주':
+                                key = (image_info['dong'], image_info['ho'], image_info['usage'], image_info['line_detail'])
+                            else:
+                                key = (image_info['dong'], image_info['ho'], image_info['usage'])
+                            
+                            if key not in image_groups:
+                                image_groups[key] = 0
+                            image_groups[key] += 1
+                
+                total += video_count + len(image_groups)
         return total
         
     def process_all(self):
@@ -345,19 +364,52 @@ class CustomVideoExcelProcessor(VideoExcelProcessor):
         os.makedirs(capture_dir, exist_ok=True)
         
         # 파일 목록 가져오기
-        files = [f for f in os.listdir(folder_path) 
-                if (f.endswith('.mp4') or f.lower().endswith(('.jpg', '.jpeg', '.png')))]
+        all_files = os.listdir(folder_path)
         
-        for filename in files:
+        # 이미지 파일 그룹핑 (동, 호, 용도별로)
+        image_groups = {}
+        
+        # 이미지 파일들을 먼저 그룹핑
+        for filename in all_files:
+            if filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                image_info = self.extract_image_info(filename, pipe_type)
+                if image_info:
+                    if pipe_type == '횡주':
+                        key = (image_info['dong'], image_info['ho'], image_info['usage'], image_info['line_detail'])
+                    else:
+                        key = (image_info['dong'], image_info['ho'], image_info['usage'])
+                    
+                    if key not in image_groups:
+                        image_groups[key] = []
+                    image_groups[key].append((filename, image_info))
+        
+        # 처리할 파일들 (동영상 + 그룹당 첫 번째 이미지)
+        files_to_process = []
+        
+        # 동영상 파일 추가
+        for filename in all_files:
+            if filename.endswith('.mp4'):
+                files_to_process.append(('video', filename))
+        
+        # 이미지 그룹별 첫 번째 파일만 추가
+        for key, files_info in image_groups.items():
+            filename, image_info = files_info[0]
+            total_count = len(files_info)
+            files_to_process.append(('image', filename, total_count))
+        
+        # 파일 처리
+        for file_info in files_to_process:
             # 중지 요청 확인
             if hasattr(self.gui, 'is_processing') and not self.gui.is_processing:
                 self.log("처리가 중지되었습니다.")
                 return
                 
             self.processed_files += 1
-            progress_msg = f"[{self.processed_files}/{self.total_files}] {filename}"
             
-            if filename.endswith('.mp4'):
+            if file_info[0] == 'video':
+                filename = file_info[1]
+                progress_msg = f"[{self.processed_files}/{self.total_files}] {filename}"
+                
                 # 동영상 처리
                 video_info = self.extract_video_info(filename, pipe_type)
                 if not video_info:
@@ -391,14 +443,18 @@ class CustomVideoExcelProcessor(VideoExcelProcessor):
                 else:
                     self.log(f"❌ {filename} - 프레임 캡처 실패")
             
-            elif filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+            elif file_info[0] == 'image':
+                filename = file_info[1]
+                total_count = file_info[2]
+                progress_msg = f"[{self.processed_files}/{self.total_files}] {filename}"
+                
                 # 이미지 처리
                 image_info = self.extract_image_info(filename, pipe_type)
                 if not image_info:
                     self.log(f"❌ {progress_msg} - 파일명 패턴 불일치")
                     continue
                 
-                self.log(f"🖼️ {progress_msg}")
+                self.log(f"🖼️ {progress_msg} (총 {total_count}개 중 첫 번째)")
                 
                 # 해당 단지, 유형 워크시트 선택
                 worksheet = self.get_or_create_worksheet(image_info['complex'], pipe_type)
@@ -415,7 +471,7 @@ class CustomVideoExcelProcessor(VideoExcelProcessor):
                     continue
                 
                 # 이미지 및 텍스트 정보 입력
-                self.process_issue_image(worksheet, folder_path, filename, image_info, row)
+                self.process_issue_image(worksheet, folder_path, filename, image_info, row, total_count)
                 self.log(f"✅ {filename} - 이미지 처리 완료")
                 
     def insert_video_images(self, worksheet, pipe_type, captured_files, row):
@@ -442,7 +498,7 @@ class CustomVideoExcelProcessor(VideoExcelProcessor):
             self.insert_image_to_cell(worksheet, captured_files[1], row, check1_col)
             self.insert_image_to_cell(worksheet, captured_files[2], row, check2_col)
             
-    def process_issue_image(self, worksheet, folder_path, filename, image_info, row):
+    def process_issue_image(self, worksheet, folder_path, filename, image_info, row, total_count=1):
         """이상 이미지 처리"""
         # 컬럼 번호 찾기
         issue_image_col = self.find_column_by_name(worksheet, '이상배관사진')
@@ -458,7 +514,9 @@ class CustomVideoExcelProcessor(VideoExcelProcessor):
         if issue_col:
             worksheet.cell(row, issue_col).value = image_info['issue']
         if location_col:
-            worksheet.cell(row, location_col).value = image_info['location']
+            # 위치 정보에 총 개수 추가
+            location_text = f"{image_info['location']}({total_count})" if total_count > 1 else image_info['location']
+            worksheet.cell(row, location_col).value = location_text
             
     def insert_image_to_cell(self, worksheet, image_path, row, col):
         """이미지 삽입 (로그 제거)"""
